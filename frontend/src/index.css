@@ -1,0 +1,24 @@
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.app-nav a {
+  border-radius: 8px;
+  color: var(--mantine-color-text);
+  font-weight: 600;
+  padding: 10px 12px;
+  text-decoration: none;
+}
+
+.app-nav a:hover,
+.app-nav a.active {
+  background: var(--mantine-color-blue-light);
+  color: var(--mantine-color-blue-light-color);
+}
