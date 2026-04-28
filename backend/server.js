@@ -11,56 +11,19 @@ const frontendIndexPath = path.join(frontendDistPath, 'index.html')
 app.use(cors())
 app.use(express.json())
 
+// Registry-based calendar providers (new architecture)
+const registry = require('./calendar/registry')
+const {
+  CalendarCredentialError,
+  ProviderModelNotFoundError,
+  CalendarProviderMisconfigurationError,
+} = require('./calendar/errors')
+
 let eventTypeSequence = 1
 let bookingSequence = 1
 
-// Calendar provider error types and a minimal preflight validation layer
-class CalendarCredentialError extends Error {
-  constructor(message) {
-    super(message)
-    this.name = 'CalendarCredentialError'
-  }
-}
-
-class ProviderModelNotFoundError extends Error {
-  constructor(providerId) {
-    super(`Provider not found: ${providerId}`)
-    this.name = 'ProviderModelNotFoundError'
-    this.providerId = providerId
-  }
-}
-
-class CalendarProviderMisconfigurationError extends Error {
-  constructor(message) {
-    super(message)
-    this.name = 'CalendarProviderMisconfigurationError'
-  }
-}
-
-const SUPPORTED_CALENDAR_PROVIDERS = ['google-calendar', 'outlook-calendar']
-
-function loadConfiguredProvider() {
-  const providerId = String(process.env.CALENDAR_PROVIDER || '').trim()
-  const apiKey = String(process.env.CALENDAR_API_KEY || '').trim()
-
-  // If no external provider is configured, operate in local/mock mode without errors
-  if (!providerId) {
-    return null
-  }
-
-  if (!SUPPORTED_CALENDAR_PROVIDERS.includes(providerId)) {
-    // Simulate missing/provider-model-not-registered scenario
-    throw new ProviderModelNotFoundError(providerId)
-  }
-
-  // Very lightweight credential check (replace with real validation in prod)
-  // Consider a key valid if it looks non-empty and reasonably long.
-  if (!apiKey || apiKey.length < 16) {
-    throw new CalendarCredentialError('Invalid API key for calendar provider')
-  }
-
-  return providerId
-}
+// Calendar provider preflight is now handled via a registry module.
+// Previously defined error classes and preflight logic were removed in favor of registry-based approach.
 
 const eventTypes = [
   {
@@ -585,16 +548,20 @@ app.post('/bookings', (request, response) => {
   // Preflight: validate provider configuration and API key before processing bookings
   try {
     // Will throw if misconfigured or invalid
-    loadConfiguredProvider()
+    registry.loadConfiguredProvider()
   } catch (err) {
-    if (err instanceof CalendarCredentialError) {
+    // Map registry errors to API responses without leaking secrets
+    const name = err && err.name ? err.name : ''
+    if (name === 'CalendarCredentialError') {
       return sendError(response, 403, 'Invalid calendar API key.')
     }
-    if (err instanceof CalendarProviderMisconfigurationError) {
+    if (name === 'CalendarProviderMisconfigurationError') {
       return sendError(response, 500, err.message)
     }
-    if (err instanceof ProviderModelNotFoundError) {
-      return sendError(response, 500, `Calendar provider not registered: ${err.providerId}`)
+    if (name === 'ProviderModelNotFoundError') {
+      // Unknown provider configured in env
+      const providerId = err.providerId || 'unknown'
+      return sendError(response, 500, `Calendar provider not registered: ${providerId}`)
     }
     return sendError(response, 500, 'Calendar provider error.')
   }
@@ -663,6 +630,10 @@ app.use((_request, response) => {
   sendError(response, 404, 'Маршрут не найден.')
 })
 
-app.listen(port, () => {
-  console.log(`Calendar Booking API is running at http://localhost:${port}`)
-})
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Calendar Booking API is running at http://localhost:${port}`)
+  })
+}
+
+module.exports = app
