@@ -14,6 +14,54 @@ app.use(express.json())
 let eventTypeSequence = 1
 let bookingSequence = 1
 
+// Calendar provider error types and a minimal preflight validation layer
+class CalendarCredentialError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'CalendarCredentialError'
+  }
+}
+
+class ProviderModelNotFoundError extends Error {
+  constructor(providerId) {
+    super(`Provider not found: ${providerId}`)
+    this.name = 'ProviderModelNotFoundError'
+    this.providerId = providerId
+  }
+}
+
+class CalendarProviderMisconfigurationError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'CalendarProviderMisconfigurationError'
+  }
+}
+
+const SUPPORTED_CALENDAR_PROVIDERS = ['google-calendar', 'outlook-calendar']
+
+function loadConfiguredProvider() {
+  const providerId = String(process.env.CALENDAR_PROVIDER || '').trim()
+  const apiKey = String(process.env.CALENDAR_API_KEY || '').trim()
+
+  // If no external provider is configured, operate in local/mock mode without errors
+  if (!providerId) {
+    return null
+  }
+
+  if (!SUPPORTED_CALENDAR_PROVIDERS.includes(providerId)) {
+    // Simulate missing/provider-model-not-registered scenario
+    throw new ProviderModelNotFoundError(providerId)
+  }
+
+  // Very lightweight credential check (replace with real validation in prod)
+  // Consider a key valid if it looks non-empty and reasonably long.
+  if (!apiKey || apiKey.length < 16) {
+    throw new CalendarCredentialError('Invalid API key for calendar provider')
+  }
+
+  return providerId
+}
+
 const eventTypes = [
   {
     id: 'meeting-15',
@@ -534,6 +582,23 @@ app.get('/bookings', (request, response) => {
 })
 
 app.post('/bookings', (request, response) => {
+  // Preflight: validate provider configuration and API key before processing bookings
+  try {
+    // Will throw if misconfigured or invalid
+    loadConfiguredProvider()
+  } catch (err) {
+    if (err instanceof CalendarCredentialError) {
+      return sendError(response, 403, 'Invalid calendar API key.')
+    }
+    if (err instanceof CalendarProviderMisconfigurationError) {
+      return sendError(response, 500, err.message)
+    }
+    if (err instanceof ProviderModelNotFoundError) {
+      return sendError(response, 500, `Calendar provider not registered: ${err.providerId}`)
+    }
+    return sendError(response, 500, 'Calendar provider error.')
+  }
+
   const eventTypeId = normalizeOptionalString(request.body.eventTypeId)
   const start = parseDateTime(request.body.start)
   const guestName = normalizeOptionalString(request.body.guestName)
