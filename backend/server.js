@@ -11,8 +11,19 @@ const frontendIndexPath = path.join(frontendDistPath, 'index.html')
 app.use(cors())
 app.use(express.json())
 
+// Registry-based calendar providers (new architecture)
+const registry = require('./calendar/registry')
+const {
+  CalendarCredentialError,
+  ProviderModelNotFoundError,
+  CalendarProviderMisconfigurationError,
+} = require('./calendar/errors')
+
 let eventTypeSequence = 1
 let bookingSequence = 1
+
+// Calendar provider preflight is now handled via a registry module.
+// Previously defined error classes and preflight logic were removed in favor of registry-based approach.
 
 const eventTypes = [
   {
@@ -534,6 +545,27 @@ app.get('/bookings', (request, response) => {
 })
 
 app.post('/bookings', (request, response) => {
+  // Preflight: validate provider configuration and API key before processing bookings
+  try {
+    // Will throw if misconfigured or invalid
+    registry.loadConfiguredProvider()
+  } catch (err) {
+    // Map registry errors to API responses without leaking secrets
+    const name = err && err.name ? err.name : ''
+    if (name === 'CalendarCredentialError') {
+      return sendError(response, 403, 'Invalid calendar API key.')
+    }
+    if (name === 'CalendarProviderMisconfigurationError') {
+      return sendError(response, 500, err.message)
+    }
+    if (name === 'ProviderModelNotFoundError') {
+      // Unknown provider configured in env
+      const providerId = err.providerId || 'unknown'
+      return sendError(response, 500, `Calendar provider not registered: ${providerId}`)
+    }
+    return sendError(response, 500, 'Calendar provider error.')
+  }
+
   const eventTypeId = normalizeOptionalString(request.body.eventTypeId)
   const start = parseDateTime(request.body.start)
   const guestName = normalizeOptionalString(request.body.guestName)
@@ -598,6 +630,10 @@ app.use((_request, response) => {
   sendError(response, 404, 'Маршрут не найден.')
 })
 
-app.listen(port, () => {
-  console.log(`Calendar Booking API is running at http://localhost:${port}`)
-})
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Calendar Booking API is running at http://localhost:${port}`)
+  })
+}
+
+module.exports = app
