@@ -1,0 +1,92 @@
+name: Lighthouse Check
+
+on:
+  # Nightly run (UTC). Adjust as needed
+  schedule:
+    - cron: '0 2 * * *'
+  # Manual trigger for on-demand checks
+  workflow_dispatch:
+
+jobs:
+  lighthouse-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: |
+          if npm run build; then
+            echo "Frontend build succeeded"
+          else
+            echo "Frontend build failed or no build script";
+            exit 1;
+          fi
+
+      - name: Run Lighthouse (server + report)
+        id: lighthouse
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT_DIR="lighthouse-report-$(date +%Y%m%d-%H%M%S)"
+          mkdir -p "$REPORT_DIR"
+
+          OUTPUT_DIR=""
+          if [ -d dist ]; then
+            OUTPUT_DIR="dist"
+          elif [ -d build ]; then
+            OUTPUT_DIR="build"
+          else
+            echo "No build output directory found (dist/build)"; exit 1
+          fi
+
+          echo "Starting static server from $OUTPUT_DIR on port 3000"
+          # Serve the built frontend
+          npx http-server "$OUTPUT_DIR" -p 3000 >/tmp/server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+
+          # Wait for the server to be available
+          for i in {1..60}; do
+            if curl -sSf http://127.0.0.1:3000 >/dev/null; then
+              echo "Server is up"
+              break
+            fi
+            sleep 1
+          done
+
+          if ! curl -sSf http://127.0.0.1:3000 >/dev/null; then
+            echo "Server failed to start"; kill "$SERVER_PID" || true; exit 1
+          fi
+
+          echo "Running Lighthouse against http://127.0.0.1:3000"
+          npx lighthouse http://127.0.0.1:3000 \
+            --output html \
+            --output json \
+            --output-path "$REPORT_DIR/report.html" || { echo 'Lighthouse failed'; kill "$SERVER_PID" || true; exit 1; }
+
+          echo "Lighthouse finished, stopping server"
+          kill "$SERVER_PID" || true
+          echo "REPORT_DIR=$REPORT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Lighthouse report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: lighthouse-report
+          path: ${{ steps.lighthouse.outputs.REPORT_DIR }}
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Lighthouse report artifact: ${{ steps.lighthouse.outputs.REPORT_DIR }}/report.html and ${{ steps.lighthouse.outputs.REPORT_DIR }}/report.json. See the Artifacts tab for the 'lighthouse-report' artifact." >> $GITHUB_STEP_SUMMARY
+        shell: bash
