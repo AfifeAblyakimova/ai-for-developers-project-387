@@ -30,4 +30,4 @@ jobs:
       - name: Run OpenCode
         uses: anomalyco/opencode/github@latest
         with:
-          model: gpt-4o-mini
+          model: openai/gpt-4o
