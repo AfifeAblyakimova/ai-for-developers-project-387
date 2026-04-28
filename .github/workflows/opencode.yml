@@ -26,7 +26,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Tokenator secrets
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        run: |
+          test -n "$OPENAI_API_KEY"
+          test -n "$OPENAI_BASE_URL"
+          echo "Tokenator secrets are configured."
+
       - name: Run opencode
         uses: anomalyco/opencode/github@latest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
         with:
-          model: opencode/minimax-m2.5-free
+          model: openai/gpt-4o-mini
